@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer";
 import { Duplex } from "node:stream";
 import { connect } from "cloudflare:sockets";
 import { Client, type ClientChannel, type SFTPWrapper } from "ssh2";
-import type { Language, RemoteFile, ServerProfile, TerminalMessage } from "../shared/types";
+import type { Language, ProcessInfo, RemoteFile, ServerMetrics, ServerProfile, TerminalMessage } from "../shared/types";
 
 export type SshBridge = {
   handleClientMessage(message: TerminalMessage): void;
@@ -33,6 +33,7 @@ export function createSshBridge(socket: WebSocket, options: SshBridgeOptions): S
   let tcpStream: CloudflareSocketDuplex | null = null;
   let currentLine = "";
   let shellSize: ShellSize = { cols: 80, rows: 24 };
+  let metricsTimer: ReturnType<typeof setInterval> | null = null;
   const uploadStreams = new Map<string, NodeJS.WritableStream>();
 
   const MAX_READ_SIZE = 2 * 1024 * 1024;
@@ -83,6 +84,7 @@ export function createSshBridge(socket: WebSocket, options: SshBridgeOptions): S
             if (err) return;
             sftpSession = sftp;
           });
+          startMetricsCollection();
         })
         .on("banner", (message) => send({ type: "output", data: `${message}\r\n` }))
         .on("error", (error) => send({ type: "error", message: `${copy.connectFailed}${error.message}` }))
@@ -141,6 +143,125 @@ export function createSshBridge(socket: WebSocket, options: SshBridgeOptions): S
     shellSize = { cols, rows };
     shell?.setWindow(rows, cols, rows * 16, cols * 8);
   }
+
+  // ── Metrics collection ──────────────────────────────────────────────
+
+  const METRICS_CMD = [
+    // CPU: read /proc/stat twice with 1s gap for delta
+    `cat /proc/stat | head -1`,
+    `sleep 1`,
+    `cat /proc/stat | head -1`,
+    // Memory & swap from /proc/meminfo
+    `cat /proc/meminfo`,
+    // Disk usage of root partition
+    `df -B1 / | tail -1`,
+    // Top 8 processes by CPU
+    `ps -eo pid,user,%cpu,%mem,comm --sort=-%cpu --no-headers | head -8`
+  ].join(" && echo '---SECTION---' && ");
+
+  function startMetricsCollection() {
+    collectMetrics();
+    metricsTimer = setInterval(collectMetrics, 5000);
+  }
+
+  function collectMetrics() {
+    if (!conn) return;
+    conn.exec(METRICS_CMD, (err, channel) => {
+      if (err) return;
+      let output = "";
+      channel.on("data", (data: Buffer | string) => { output += data.toString(); });
+      channel.stderr.on("data", () => {});
+      channel.on("close", () => {
+        try {
+          const result = parseMetrics(output);
+          if (result) send({ type: "metrics", ...result });
+        } catch {}
+      });
+    });
+  }
+
+  function parseMetrics(raw: string): { metrics: ServerMetrics; processes: ProcessInfo[] } | null {
+    const sections = raw.split("---SECTION---").map(s => s.trim());
+    if (sections.length < 5) return null;
+
+    // CPU delta
+    const cpuPercent = parseCpuDelta(sections[0], sections[1]);
+
+    // Memory
+    const meminfo = sections[2];
+    const memory = parseMeminfo(meminfo, "MemTotal", "MemAvailable");
+    const swap = parseMeminfo(meminfo, "SwapTotal", "SwapFree");
+
+    // Disk
+    const disk = parseDf(sections[3]);
+
+    // Processes
+    const processes = parseProcesses(sections[4]);
+
+    return {
+      metrics: { cpuPercent, memory, swap, disk, updatedAt: new Date().toISOString() },
+      processes
+    };
+  }
+
+  function parseCpuDelta(line1: string, line2: string): number {
+    const parse = (line: string) => {
+      const parts = line.replace(/^cpu\s+/, "").trim().split(/\s+/).map(Number);
+      const idle = parts[3] + (parts[4] ?? 0); // idle + iowait
+      const total = parts.reduce((a, b) => a + b, 0);
+      return { idle, total };
+    };
+    try {
+      const a = parse(line1);
+      const b = parse(line2);
+      const dTotal = b.total - a.total;
+      const dIdle = b.idle - a.idle;
+      if (dTotal === 0) return 0;
+      return Math.round(((dTotal - dIdle) / dTotal) * 100);
+    } catch {
+      return 0;
+    }
+  }
+
+  function parseMeminfo(raw: string, totalKey: string, freeKey: string) {
+    const get = (key: string) => {
+      const match = raw.match(new RegExp(`${key}:\\s+(\\d+)`));
+      return match ? Number(match[1]) * 1024 : 0; // kB → bytes
+    };
+    const total = get(totalKey);
+    const free = get(freeKey);
+    const used = total - free;
+    const totalGb = +(total / 1073741824).toFixed(1);
+    const usedGb = +(used / 1073741824).toFixed(1);
+    const percent = total > 0 ? Math.round((used / total) * 100) : 0;
+    return { used: usedGb, total: totalGb, percent };
+  }
+
+  function parseDf(line: string) {
+    const parts = line.trim().split(/\s+/);
+    // df -B1 output: filesystem 1B-blocks used available use% mount
+    const total = Number(parts[1]) || 0;
+    const used = Number(parts[2]) || 0;
+    const totalGb = +(total / 1073741824).toFixed(1);
+    const usedGb = +(used / 1073741824).toFixed(1);
+    const percent = total > 0 ? Math.round((used / total) * 100) : 0;
+    return { used: usedGb, total: totalGb, percent };
+  }
+
+  function parseProcesses(raw: string): ProcessInfo[] {
+    return raw.split("\n").filter(Boolean).map(line => {
+      const parts = line.trim().split(/\s+/);
+      return {
+        pid: Number(parts[0]),
+        user: parts[1] ?? "",
+        cpu: Number(parts[2]) || 0,
+        memory: Number(parts[3]) || 0,
+        command: parts.slice(4).join(" ")
+      };
+    });
+  }
+
+  // ── SFTP operations ─────────────────────────────────────────────────
 
   function handleSftpLs(requestId: string, path: string) {
     if (!sftpSession) return send({ type: "sftp-error", requestId, message: "SFTP 会话未就绪" });
@@ -252,6 +373,7 @@ export function createSshBridge(socket: WebSocket, options: SshBridgeOptions): S
   }
 
   function close() {
+    if (metricsTimer) { clearInterval(metricsTimer); metricsTimer = null; }
     for (const stream of uploadStreams.values()) stream.end();
     uploadStreams.clear();
     sftpSession?.end();

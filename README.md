@@ -19,9 +19,9 @@ English documentation: [Readme_EN.md](./Readme_EN.md)
 
 ## 当前状态说明
 
-当前项目已经完成前端、Worker API、认证、设置、连接管理、命令历史、文件接口和监控面板骨架。真实 SSH/SFTP 协议接入被隔离在 [worker/sshBridge.ts](./worker/sshBridge.ts)，目前是可运行的开发桥接模式。
+当前项目已完成前端、Worker API、认证、设置、连接管理、命令历史、SFTP 文件管理和监控面板。真实 SSH/SFTP 协议已通过 Cloudflare Worker 的 `cloudflare:sockets` TCP Socket API 接入，所有连接在 Worker 内完成协议桥接。
 
-方案 A 的目标是只部署 Cloudflare Worker，不额外部署传统后端。后续接入真实 SSH 时，建议在 `worker/sshBridge.ts` 中使用 Cloudflare Worker 的 `cloudflare:sockets` TCP Socket API 连接 VPS 的 `22` 端口，并在 Worker 内完成 SSH 协议桥接。
+> **⚠️ 重要提示：每次代码更新触发自动重新部署后，需要在 Cloudflare Dashboard 中重新绑定 KV 和 R2。** 因为 `wrangler.toml` 中没有写入 KV/R2 的绑定 ID，每次 `wrangler deploy` 会用本地配置覆盖远程配置，导致之前在 Dashboard 中手动添加的 KV 和 R2 绑定丢失。请参考下方「更新代码后重新绑定」章节。
 
 ## 目录结构
 
@@ -236,6 +236,48 @@ TAFENG_FILES
 
 也可以在 GitHub 网页里对 README 做一个很小的修改并提交，触发 Cloudflare 自动重新构建部署。
 
+> **⚠️ 注意：每次重新部署后，KV 和 R2 绑定会被覆盖清空。** 请务必在部署完成后回到 Worker Settings → Bindings，重新添加 `TAFENG_KV` 和 `TAFENG_FILES` 绑定。否则登录、设置、连接信息、命令历史和文件上传功能将无法使用。
+
+### 更新代码后重新绑定
+
+每次从 GitHub 推送代码触发 Cloudflare 自动构建后，都需要执行以下步骤：
+
+1. 等待 Cloudflare 自动构建部署完成。
+2. 打开 Cloudflare Dashboard → `Workers & Pages` → `tafeng` → `Settings` → `Bindings`。
+3. 重新添加 KV 绑定：
+
+```text
+Variable name: TAFENG_KV
+KV namespace: tafeng-kv
+```
+
+4. 重新添加 R2 绑定：
+
+```text
+Variable name: TAFENG_FILES
+R2 bucket: tafeng-files
+```
+
+5. 点击 `Save` 或 `Deploy` 保存绑定。
+
+> **提示：** 如果你希望避免每次都手动绑定，也可以直接在 `wrangler.toml` 中写入你的 KV Namespace ID 和 R2 Bucket 名称。参见下方「在 wrangler.toml 中固定绑定」章节。
+
+### 在 wrangler.toml 中固定绑定（可选）
+
+在 `wrangler.toml` 中添加以下内容，即可让每次部署自动携带绑定，无需手动操作：
+
+```toml
+[[kv_namespaces]]
+binding = "TAFENG_KV"
+id = "你的KV Namespace ID"
+
+[[r2_buckets]]
+binding = "TAFENG_FILES"
+bucket_name = "tafeng-files"
+```
+
+KV Namespace ID 可以在 Cloudflare Dashboard → `Storage & Databases` → `KV` → 点击你的 namespace 后在页面上找到。添加后提交到 GitHub，后续部署就不需要再手动绑定了。
+
 ### 10. 访问踏风
 
 部署成功后，Cloudflare 会给你一个 `workers.dev` 地址，例如：
@@ -248,8 +290,8 @@ https://tafeng.你的子域.workers.dev
 
 1. 输入 `ADMIN_PASSWORD` 中设置的管理密码。
 2. 进入控制台。
-3. 在左侧添加 VPS 连接信息。
-4. 当前版本仍是开发桥接模式，真实 SSH/SFTP 需要后续在 [worker/sshBridge.ts](./worker/sshBridge.ts) 中接入 Worker TCP Socket。
+3. 在左侧添加 VPS 连接信息（IP/域名、端口、用户名、密码或私钥）。
+4. 点击连接后即可使用 WebSSH 终端、SFTP 文件管理和实时状态监控。
 
 ### 11. 配置自定义域名
 

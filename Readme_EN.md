@@ -20,9 +20,9 @@ Chinese documentation: [README.md](./README.md)
 
 ## Current Status
 
-The project currently includes the frontend, Worker APIs, authentication, settings, connection management, command history, file APIs, and monitoring UI. Real SSH/SFTP protocol integration is isolated in [worker/sshBridge.ts](./worker/sshBridge.ts). The current implementation is a runnable development bridge.
+The project includes the frontend, Worker APIs, authentication, settings, connection management, command history, SFTP file management, and monitoring panel. Real SSH/SFTP protocol integration uses Cloudflare Worker's `cloudflare:sockets` TCP Socket API, with all connections bridged inside the Worker.
 
-The goal of Option A is to deploy only Cloudflare Worker, without a separate traditional backend. For real SSH support, implement the bridge in `worker/sshBridge.ts` using Cloudflare Workers' `cloudflare:sockets` TCP Socket API to connect to the VPS `22` port.
+> **⚠️ Important: After each code update triggers an automatic redeployment, you must rebind KV and R2 in the Cloudflare Dashboard.** Because `wrangler.toml` does not include KV/R2 binding IDs, each `wrangler deploy` overwrites the remote configuration, removing any manually added KV and R2 bindings. See the "Rebinding After Code Updates" section below.
 
 ## Project Structure
 
@@ -237,6 +237,48 @@ After binding KV/R2 and adding Secrets, redeploy once:
 
 You can also make a tiny README edit in GitHub and commit it to trigger a new Cloudflare build.
 
+> **⚠️ Note: After each redeployment, KV and R2 bindings will be overwritten and cleared.** You must go back to Worker Settings → Bindings and re-add the `TAFENG_KV` and `TAFENG_FILES` bindings. Otherwise login, settings, connection profiles, command history, and file upload features will not work.
+
+### Rebinding After Code Updates
+
+Every time you push code to GitHub and trigger a Cloudflare auto-build, you need to:
+
+1. Wait for the Cloudflare build and deployment to complete.
+2. Open Cloudflare Dashboard → `Workers & Pages` → `tafeng` → `Settings` → `Bindings`.
+3. Re-add KV binding:
+
+```text
+Variable name: TAFENG_KV
+KV namespace: tafeng-kv
+```
+
+4. Re-add R2 binding:
+
+```text
+Variable name: TAFENG_FILES
+R2 bucket: tafeng-files
+```
+
+5. Click `Save` or `Deploy` to save the bindings.
+
+> **Tip:** To avoid manual rebinding every time, you can add your KV Namespace ID and R2 Bucket name directly to `wrangler.toml`. See the "Pinning Bindings in wrangler.toml" section below.
+
+### Pinning Bindings in wrangler.toml (Optional)
+
+Add the following to `wrangler.toml` to automatically include bindings with every deployment:
+
+```toml
+[[kv_namespaces]]
+binding = "TAFENG_KV"
+id = "your-kv-namespace-id"
+
+[[r2_buckets]]
+binding = "TAFENG_FILES"
+bucket_name = "tafeng-files"
+```
+
+You can find your KV Namespace ID in Cloudflare Dashboard → `Storage & Databases` → `KV` → click your namespace. After adding this, commit to GitHub and future deployments will not require manual rebinding.
+
 ### 10. Open Tafeng
 
 After deployment, Cloudflare will provide a `workers.dev` URL, for example:
@@ -249,8 +291,8 @@ Open it:
 
 1. Enter the password configured in `ADMIN_PASSWORD`.
 2. Enter the console.
-3. Add VPS connection profiles from the left panel.
-4. The current version is still in development bridge mode. Real SSH/SFTP needs to be implemented in [worker/sshBridge.ts](./worker/sshBridge.ts) using Worker TCP Socket.
+3. Add VPS connection profiles from the left panel (IP/domain, port, username, password or private key).
+4. After connecting, use the WebSSH terminal, SFTP file manager, and live status monitoring.
 
 ### 11. Configure a Custom Domain
 

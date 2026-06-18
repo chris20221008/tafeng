@@ -386,6 +386,9 @@ select:focus {
 .file-browser {
   padding: 12px;
   border-right: 1px solid #252525;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .file-browser .panel-title input {
@@ -395,6 +398,8 @@ select:focus {
 .file-list {
   display: grid;
   gap: 6px;
+  align-content: start;
+  overflow-y: auto;
 }
 
 .file-list button {
