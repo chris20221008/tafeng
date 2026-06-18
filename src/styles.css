@@ -172,7 +172,7 @@ select:focus {
   grid-template-columns: 280px minmax(0, 1fr) 320px;
   gap: 14px;
   padding: 14px;
-  height: calc(100vh - 58px);
+  min-height: calc(100vh - 58px);
 }
 
 .side-panel,
@@ -676,6 +676,7 @@ select:focus {
 .light .monitor-panel,
 .light .terminal-wrap,
 .light .file-editor,
+.light .history-panel,
 .light .login-panel {
   background: #ffffff;
   border-color: #dedede;
@@ -692,7 +693,8 @@ select:focus {
 .light .two-factor-button,
 .light .ghost-button,
 .light .connection-actions button,
-.light .inline-icon-button {
+.light .inline-icon-button,
+.light .history-actions button {
   background: #f7f7f7;
   border-color: #dadada;
   color: #111;
@@ -706,8 +708,6 @@ select:focus {
 @media (max-width: 1120px) {
   .workspace {
     grid-template-columns: 240px minmax(0, 1fr);
-    height: auto;
-    min-height: calc(100vh - 58px);
   }
 
   .monitor-panel {
