@@ -149,8 +149,7 @@ export function createSshBridge(socket: WebSocket, options: SshBridgeOptions): S
   const METRICS_CMD = [
     // CPU: read /proc/stat twice with 1s gap for delta
     `cat /proc/stat | head -1`,
-    `sleep 1`,
-    `cat /proc/stat | head -1`,
+    `sleep 1 && cat /proc/stat | head -1`,
     // Memory & swap from /proc/meminfo
     `cat /proc/meminfo`,
     // Disk usage of root partition
@@ -161,7 +160,7 @@ export function createSshBridge(socket: WebSocket, options: SshBridgeOptions): S
 
   function startMetricsCollection() {
     collectMetrics();
-    metricsTimer = setInterval(collectMetrics, 5000);
+    metricsTimer = setInterval(collectMetrics, 8000);
   }
 
   function collectMetrics() {
