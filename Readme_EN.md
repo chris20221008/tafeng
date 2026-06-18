@@ -45,6 +45,222 @@ tafeng/
 - A Cloudflare account.
 - Wrangler CLI. This project includes `wrangler` in devDependencies, so you can use `npm run worker:dev` and `npm run worker:deploy`.
 
+## Deploy to Cloudflare Worker from the Web UI
+
+This is the recommended deployment path for most users. Start by forking the repository on GitHub, then finish the deployment in the Cloudflare Dashboard. No local terminal commands are required for this path.
+
+### 1. Fork the Project on GitHub
+
+1. Open this project's GitHub repository page.
+2. Click `Fork` in the top-right corner.
+3. Choose your GitHub account or organization as the owner.
+4. Keep the repository name as `tafeng`, or rename it if you prefer.
+5. Click `Create fork`.
+
+After that, you will have your own repository, for example:
+
+```text
+https://github.com/your-username/tafeng
+```
+
+All following changes should be made in your fork, not in the upstream repository.
+
+### 2. Create KV Namespaces in Cloudflare
+
+Tafeng uses KV to store sessions, settings, VPS connection profiles, and command history.
+
+1. Open the [Cloudflare Dashboard](https://dash.cloudflare.com/).
+2. Go to `Storage & Databases` in the sidebar.
+3. Open `KV`.
+4. Click `Create namespace`.
+5. Create the production namespace:
+
+```text
+tafeng-kv
+```
+
+6. Create the preview namespace:
+
+```text
+tafeng-kv-preview
+```
+
+7. Open each namespace and copy its Namespace ID.
+
+You need two values:
+
+```text
+Production KV ID
+Preview KV ID
+```
+
+### 3. Create R2 Buckets in Cloudflare
+
+Tafeng uses R2 for uploaded files and large-file staging.
+
+1. In the Cloudflare Dashboard sidebar, open `R2 Object Storage`.
+2. Click `Create bucket`.
+3. Create the production bucket:
+
+```text
+tafeng-files
+```
+
+4. Create the preview bucket:
+
+```text
+tafeng-files-preview
+```
+
+The bucket names should match [wrangler.toml](./wrangler.toml). You may use different names, but then you must also update `wrangler.toml`.
+
+### 4. Edit wrangler.toml on GitHub
+
+Go back to your forked GitHub repository.
+
+1. Open [wrangler.toml](./wrangler.toml).
+2. Click the pencil icon in the top-right corner.
+3. Find the KV configuration:
+
+```toml
+[[kv_namespaces]]
+binding = "TAFENG_KV"
+id = "replace-with-production-kv-id"
+preview_id = "replace-with-preview-kv-id"
+```
+
+4. Replace the placeholder values with the KV IDs copied from Cloudflare:
+
+```toml
+[[kv_namespaces]]
+binding = "TAFENG_KV"
+id = "your-production-kv-id"
+preview_id = "your-preview-kv-id"
+```
+
+5. Confirm the R2 bucket names:
+
+```toml
+[[r2_buckets]]
+binding = "TAFENG_FILES"
+bucket_name = "tafeng-files"
+preview_bucket_name = "tafeng-files-preview"
+```
+
+6. Click `Commit changes` to save the edit to your fork.
+
+### 5. Connect the GitHub Repository in Cloudflare
+
+Cloudflare Workers can build and deploy from a GitHub repository. The exact Dashboard labels may change over time, but the flow is usually:
+
+1. Open the Cloudflare Dashboard.
+2. Go to `Workers & Pages`.
+3. Click `Create` or `Create application`.
+4. Choose a Git repository import option, usually named `Import a repository`, `Connect to Git`, or similar.
+5. Select `GitHub`.
+6. If this is your first time connecting GitHub, authorize the Cloudflare GitHub App.
+7. During authorization, select your forked `tafeng` repository.
+8. Back in Cloudflare, choose the repository and the branch to deploy, usually `main`.
+
+If the page asks for a project type, choose `Workers`, not a plain static Pages project.
+
+### 6. Fill in Build Settings
+
+Cloudflare may automatically read [wrangler.toml](./wrangler.toml). If it asks you to fill fields manually, use:
+
+```text
+Project name: tafeng
+Production branch: main
+Root directory: /
+Build command: npm run build
+Deploy command: npm run worker:deploy
+Node.js version: 20
+```
+
+If the page asks for a static assets or output directory, use:
+
+```text
+dist/client
+```
+
+If the page only provides one command field, use:
+
+```bash
+npm run build && npm run worker:deploy
+```
+
+Cloudflare's Workers Git integration UI can vary slightly between releases. The key idea is: run `npm run build` to generate `dist/client`, then let Wrangler deploy the Worker using `wrangler.toml`.
+
+### 7. Set Environment Variables and Secrets
+
+The first deployment may still work with the default password `tafeng`, but production must use your own admin password.
+
+After the Worker is created:
+
+1. Open `Workers & Pages` in Cloudflare Dashboard.
+2. Open the `tafeng` Worker.
+3. Go to `Settings`.
+4. Open `Variables and Secrets`.
+5. Add a Secret:
+
+```text
+Name: ADMIN_PASSWORD
+Value: your-strong-admin-password
+```
+
+Optionally add:
+
+```text
+Name: SESSION_SECRET
+Value: a long random string
+```
+
+If the Dashboard separates `Production` and `Preview` environments, set `ADMIN_PASSWORD` at least for `Production`.
+
+### 8. Redeploy
+
+After adding Secrets, redeploy once:
+
+1. Open the Worker's `Deployments` or `Builds` page.
+2. Find the latest deployment.
+3. Click `Retry deployment`, `Redeploy`, or a similar button.
+
+You can also make a tiny README edit in GitHub and commit it to trigger a new Cloudflare build.
+
+### 9. Open Tafeng
+
+After deployment, Cloudflare will provide a `workers.dev` URL, for example:
+
+```text
+https://tafeng.your-subdomain.workers.dev
+```
+
+Open it:
+
+1. Enter the password configured in `ADMIN_PASSWORD`.
+2. Enter the console.
+3. Add VPS connection profiles from the left panel.
+4. The current version is still in development bridge mode. Real SSH/SFTP needs to be implemented in [worker/sshBridge.ts](./worker/sshBridge.ts) using Worker TCP Socket.
+
+### 10. Configure a Custom Domain
+
+To use your own domain:
+
+1. Open the Cloudflare Dashboard.
+2. Go to `Workers & Pages`.
+3. Open the `tafeng` Worker.
+4. Go to `Settings`.
+5. Open `Domains & Routes`.
+6. Add a custom domain or route.
+
+Example:
+
+```text
+ssh.example.com
+```
+
+Save it and wait for DNS and certificate provisioning to complete.
+
 ## Local Development
 
 Install dependencies:

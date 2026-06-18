@@ -44,6 +44,222 @@ tafeng/
 - Cloudflare 账号。
 - Wrangler CLI。本项目已把 `wrangler` 放在 devDependencies 中，可以直接使用 `npm run worker:dev` 和 `npm run worker:deploy`。
 
+## 网页部署到 Cloudflare Worker
+
+这是推荐给普通用户的部署方式：从 GitHub Fork 开始，主要在 GitHub 网页和 Cloudflare Dashboard 里完成，不需要在本地运行命令。
+
+### 1. Fork 项目到自己的 GitHub
+
+1. 打开本项目的 GitHub 仓库页面。
+2. 点击右上角 `Fork`。
+3. Owner 选择你自己的 GitHub 账号或组织。
+4. Repository name 可以保持 `tafeng`，也可以改成你喜欢的名字。
+5. 点击 `Create fork`。
+
+完成后，你会得到一个自己的仓库，例如：
+
+```text
+https://github.com/你的用户名/tafeng
+```
+
+后续所有配置都建议改你自己 Fork 出来的仓库，不要直接改上游仓库。
+
+### 2. 在 Cloudflare 创建 KV
+
+踏风需要 KV 保存登录会话、设置、VPS 连接信息和命令历史。
+
+1. 打开 [Cloudflare Dashboard](https://dash.cloudflare.com/)。
+2. 进入左侧 `Storage & Databases`。
+3. 打开 `KV`。
+4. 点击 `Create namespace`。
+5. 创建生产 KV，名称建议填写：
+
+```text
+tafeng-kv
+```
+
+6. 再创建一个预览 KV，名称建议填写：
+
+```text
+tafeng-kv-preview
+```
+
+7. 分别打开这两个 KV Namespace，复制它们的 Namespace ID。
+
+你需要得到两个值：
+
+```text
+生产 KV ID
+预览 KV ID
+```
+
+### 3. 在 Cloudflare 创建 R2 Bucket
+
+踏风使用 R2 作为上传文件和大文件中转存储。
+
+1. 在 Cloudflare Dashboard 左侧进入 `R2 Object Storage`。
+2. 点击 `Create bucket`。
+3. 创建生产 Bucket：
+
+```text
+tafeng-files
+```
+
+4. 再创建预览 Bucket：
+
+```text
+tafeng-files-preview
+```
+
+Bucket 名称需要和 [wrangler.toml](./wrangler.toml) 中保持一致。你也可以使用自己的名称，但如果改名，后面也要同步修改 `wrangler.toml`。
+
+### 4. 在 GitHub 网页编辑 wrangler.toml
+
+回到你 Fork 后的 GitHub 仓库。
+
+1. 打开 [wrangler.toml](./wrangler.toml)。
+2. 点击右上角铅笔图标进入编辑。
+3. 找到 KV 配置：
+
+```toml
+[[kv_namespaces]]
+binding = "TAFENG_KV"
+id = "replace-with-production-kv-id"
+preview_id = "replace-with-preview-kv-id"
+```
+
+4. 替换为你在 Cloudflare 复制到的 KV ID：
+
+```toml
+[[kv_namespaces]]
+binding = "TAFENG_KV"
+id = "你的生产 KV ID"
+preview_id = "你的预览 KV ID"
+```
+
+5. 确认 R2 Bucket 名称正确：
+
+```toml
+[[r2_buckets]]
+binding = "TAFENG_FILES"
+bucket_name = "tafeng-files"
+preview_bucket_name = "tafeng-files-preview"
+```
+
+6. 点击 `Commit changes` 保存到你的 Fork 仓库。
+
+### 5. 在 Cloudflare 连接 GitHub 仓库
+
+Cloudflare Workers 支持从 GitHub 仓库构建和部署。官方入口可能会随 Dashboard 改版微调，但大致路径如下：
+
+1. 打开 Cloudflare Dashboard。
+2. 进入 `Workers & Pages`。
+3. 点击 `Create` 或 `Create application`。
+4. 选择从 Git 仓库导入，通常显示为 `Import a repository`、`Connect to Git` 或类似入口。
+5. 选择 `GitHub`。
+6. 如果是第一次连接，Cloudflare 会要求授权 GitHub App。
+7. 授权时选择你 Fork 的 `tafeng` 仓库。
+8. 回到 Cloudflare，选择该仓库和要部署的分支，通常是 `main`。
+
+如果页面让你选择项目类型，选择 `Workers`，不要选择普通静态 Pages 项目。
+
+### 6. 填写构建配置
+
+如果 Cloudflare 自动读取 [wrangler.toml](./wrangler.toml)，大多数配置会自动识别。若页面要求手动填写，请使用下面的配置：
+
+```text
+Project name: tafeng
+Production branch: main
+Root directory: /
+Build command: npm run build
+Deploy command: npm run worker:deploy
+Node.js version: 20
+```
+
+如果页面要求填写静态资源目录或输出目录，填写：
+
+```text
+dist/client
+```
+
+如果页面只提供一个命令输入框，优先填写：
+
+```bash
+npm run build && npm run worker:deploy
+```
+
+注意：不同版本的 Cloudflare Workers Git 集成页面字段可能略有不同。核心原则是先执行 `npm run build` 生成 `dist/client`，再由 Wrangler 使用 `wrangler.toml` 部署 Worker。
+
+### 7. 设置环境变量和密钥
+
+首次部署可能可以用默认密码 `tafeng` 进入，但生产环境必须设置自己的管理密码。
+
+部署成功后：
+
+1. 进入 Cloudflare Dashboard 的 `Workers & Pages`。
+2. 打开 `tafeng` Worker。
+3. 进入 `Settings`。
+4. 打开 `Variables and Secrets`。
+5. 添加 Secret：
+
+```text
+名称: ADMIN_PASSWORD
+值: 你的强管理密码
+```
+
+可选再添加：
+
+```text
+名称: SESSION_SECRET
+值: 一串随机长字符串
+```
+
+如果页面区分 `Production` 和 `Preview` 环境，建议至少在 `Production` 中设置 `ADMIN_PASSWORD`。
+
+### 8. 重新部署
+
+设置 Secret 后，建议重新部署一次：
+
+1. 进入 Worker 的 `Deployments` 或 `Builds` 页面。
+2. 找到最新一次部署。
+3. 点击 `Retry deployment`、`Redeploy` 或类似按钮。
+
+也可以在 GitHub 网页里对 README 做一个很小的修改并提交，触发 Cloudflare 自动重新构建部署。
+
+### 9. 访问踏风
+
+部署成功后，Cloudflare 会给你一个 `workers.dev` 地址，例如：
+
+```text
+https://tafeng.你的子域.workers.dev
+```
+
+打开地址后：
+
+1. 输入 `ADMIN_PASSWORD` 中设置的管理密码。
+2. 进入控制台。
+3. 在左侧添加 VPS 连接信息。
+4. 当前版本仍是开发桥接模式，真实 SSH/SFTP 需要后续在 [worker/sshBridge.ts](./worker/sshBridge.ts) 中接入 Worker TCP Socket。
+
+### 10. 配置自定义域名
+
+如果你想使用自己的域名：
+
+1. 打开 Cloudflare Dashboard。
+2. 进入 `Workers & Pages`。
+3. 打开 `tafeng` Worker。
+4. 进入 `Settings`。
+5. 打开 `Domains & Routes`。
+6. 添加自定义域名或路由。
+
+例如：
+
+```text
+ssh.example.com
+```
+
+保存后，等待 DNS 和证书生效即可访问。
+
 ## 本地开发
 
 安装依赖：
